@@ -273,7 +273,7 @@ class hyperbolic{
         //use poincare disk
         const r=Math.hypot(x,y);
         if(r==0){
-            this.z=c32.zero();
+            this.z=c32.zero;
         }else{
         const hypt=Math.tanh(r/2)/r;
         this.z=c32.const(hypt*x,hypt*y);
@@ -346,7 +346,7 @@ class hyperbolic{
     get upperhalf(){
         //上半平面
         const z=c32.const(this.y,-this.x);   
-        return c32.sub(c32.mul(c32.quot(c32.sum(c32.one(),z),c32.sub(c32.one(),z)),c32.imag(1)),c32.imag(1));
+        return c32.sub(c32.mul(c32.quot(c32.sum(c32.one,z),c32.sub(c32.one,z)),c32.i),c32.i);
     }
     disk(f){
         //0でクライン、1でポアンカレ
@@ -380,7 +380,7 @@ const hyperbolicGeometry={
         return this.translate(c32.poler(Math.tanh(this.distance(p,q)/4),this.arg(this.translate(p,c32.neg(q)))),q);
     },
     translate(z,a){
-        return c32.quot(c32.sum(a,z),c32.sum(c32.mul(z,c32.conjugate(a)),c32.one()));
+        return c32.quot(c32.const(a[0]+z[0],a[1]+z[1]),c32.sum(c32.mul(z,c32.conjugate(a)),c32.one));
     },
     //鏡映変換
     reflection(p,q,point){
@@ -430,8 +430,22 @@ const projection={
         return (new cartesian(pole.x,pole.y,pole.z)).scale(1/(1-pole.w/pole.r));
     },
     poincareDisk(hyp){
-        return this.orthogonal(hyp);
-        //return (new cartesian2D(hyp.x,-hyp.y)).scale(1/(1+Math.sqrt(1+hyp.x*hyp.x+hyp.y*hyp.y)));
+        return hyp;
+    },
+    klein(hyp){
+        //ベルトラミ・クラインモデル
+        const abs=c32.abs(hyp)[0];
+        return c32.prod(c32.prod(hyp,2),1/(1+abs*abs));
+    },
+    upperhalf(hyp){
+        //上半平面
+        const z=c32.const(hyp[1],-hyp[0]);   
+        return c32.sub(c32.mul(c32.quot(c32.sum(c32.one,z),c32.sub(c32.one,z)),c32.i),c32.i);
+    },
+    disk(hyp,f){
+        //0でクライン、1でポアンカレ
+        const abs=c32.abs(hyp)[0];
+        return c32.prod(c32.prod(hyp,2),1/(1+f+abs*abs*(1-f)));
     }
 }
 function Cl(hyperbolic,imaginary){
@@ -519,11 +533,7 @@ const c32={
         c[1]=b;
         return c;
     },
-    one(){
-        const c=new Float32Array(2);
-        c[0]=1;
-        return c;
-    },
+    one:new Float32Array([1,0]),
     real(a){
         const c=new Float32Array(2);
         c[0]=a;
@@ -534,9 +544,8 @@ const c32={
         c[1]=a;
         return c;
     },
-    zero(){
-        return new Float32Array(2);
-    },
+    i:new Float32Array([0,1]),
+    zero:new Float32Array(2),
     neg(z){
         const c=new Float32Array(2);
         c[0]=-z[0];
