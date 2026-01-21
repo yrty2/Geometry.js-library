@@ -29,11 +29,14 @@ class geometry{
                 return c128.quot(c128.sum(p,a),c128.sub([1,0],c128.mul(p,c128.conjugate(a))));
             }
             if(this.dim==3){
-                const aa=vectordot(a,a);
-                if(aa>0){
-                const pp=vectordot(p,p);
-                const pa=vectordot(p,a);
-                return vectormul(vectorsum(vectormul(p,1-aa-2*pa),vectormul(a,1+pp)),1/(1-2*pa+aa*pp));
+                const qq=vectordot(a,a);
+                if(qq>0){
+                    const pq=vectordot(p,a);
+                    const pp=vectordot(p,p);
+                return vectormul(
+                        vectorsum(vectormul(p,1-qq-2*pq),vectormul(a,(1+pp))),
+                    1/(1-2*pq+pp*qq)
+                );
                 }
                 return p;
             }
@@ -67,13 +70,43 @@ class geometry{
     }
     scale(p,s){
         if(this.type[0]=="S"){
-            return vectormul(p,s);
+            const a=vectorlength(p);
+            return vectormul(p,Math.tan(s*Math.atan(a))/a);
         }
         if(this.type[0]=="E"){
             return vectormul(p,s);
         }
         if(this.type[0]=="H"){
             return vectormul(p,s);
+        }
+    }
+    midpoint(P){
+        if(this.type[0]=="S"){
+            if(this.dim==3){
+                let ls=[0,0,0,0];
+                for(let k=0; k<P.length; ++k){
+                    ls=vectorsum(ls,vectormul(
+                        [2*P[k][0],2*P[k][1],2*P[k][2],vectordot(P[k],P[k])-1],
+                        1/(vectordot(P[k],P[k])+1)
+                    ));
+                }
+                const lm=vectornormalize(ls);
+                return vectormul(lm.slice(0,3),1/(1-lm[3]));
+            }
+        }
+    }
+    refrection(P,m){
+        const res=[];
+        if(this.type[0]=="S"){
+            if(this.dim==3){
+                const vn=vectornormalize(m);
+                const m2=this.scale(m,2);
+                for(const p of P){
+                    const mirrored=vectorsub(p,vectormul(vn,2*vectordot(p,vn)));
+                    res.push(this.translate(m2,mirrored));
+                }
+                return res;
+            }
         }
     }
 }
@@ -119,6 +152,13 @@ function vectordot(a,b){
     }
     return res;
 }
+function vectormot(a,b){
+    let res=a[0]*b[0];
+    for(let k=1; k<a.length; ++k){
+        res-=a[k]*b[k];
+    }
+    return res;
+}
 function vectornormalize(a){
     const s=vectorlength(a);
     if(s>0){
@@ -144,20 +184,15 @@ const projection={
             return new cartesian2D(cart.x/cart.z,cart.y/cart.z);
         }
     },
-    spherical(p,r){
-        if(!r){
-            r=1;
+    stereographic(pole){
+        if(pole.constructor==polerSpherical){
+        return (new cartesian2D(Math.cos(pole.theta)*Math.sin(pole.phi),
+                Math.sin(pole.theta)*Math.sin(pole.phi))).scale(pole.radius/(1-Math.cos(pole.phi)));
         }
-        const len2=vectordot(p,p);
-        const v=vectormul(p,2);
-        v.push(len2-1);
-        return vectormul(v,1/(len2+1));
+        return (new cartesian2D(pole.x,pole.y)).scale(1/(1-pole.z/pole.r));
     },
-    stereographic(p,r){
-        if(!r){
-            r=1;
-        }
-        return vectormul(p.slice(0,p.length-1),1-p[p.length-1]/r);
+    stereographic3D(pole){
+        return (new cartesian(pole.x,pole.y,pole.z)).scale(1/(1-pole.w/pole.r));
     },
     poincareDisk(hyp){
         return hyp;
@@ -330,7 +365,24 @@ const c128={
 //うまくいってない。これはそのうちやる
 const GPUworkflow=[];
 class WGPU{
-    constructor(geometry,uniformsize,wgsl){
+    constructor(geometry,uniformsize,wgsl,method){
+        this.method=method;
+        if(["instance","point","segment","raymerch"].indexOf(this.method)==-1){
+            console.warn(`methodはinstance,raymerch,point,segmentのいずれかである必要があります。\n'${this.method}'が見つかりました。`);
+            this.method="instance";
+        }
+        if(this.method=="instance"){
+            this.webGPUtopology="triangle-list";
+        }
+        if(this.method=="raymerch"){
+            this.webGPUtopology="triangle-strip";
+        }
+        if(this.method=="point"){
+            this.webGPUtopology="point-list";
+        }
+        if(this.method=="segment"){
+            this.webGPUtopology="line-list";
+        }
         this.inst=[];
         this.geometry=geometry;
         this.uniform=Array(uniformsize).fill(0);
@@ -390,6 +442,7 @@ class WGPU{
         }
         pipelinebuffers.vertex.arrayStride=bufferposition;
         bufferposition=0;
+        if(this.method=="instance"){
         for(let k=0; k<this.instanceconfig.length; ++k){
             pipelinebuffers.instance.attributes.push({shaderLocation:shaderLocations,offset:bufferposition,format:this.instanceconfig[k]});
             switch (this.instanceconfig[k]){
@@ -409,14 +462,21 @@ class WGPU{
             shaderLocations++;
         }
         pipelinebuffers.instance.arrayStride=bufferposition;
+        }
+        let bufferstructure;
+        if(this.method=="instance"){
+            bufferstructure=[pipelinebuffers.vertex,pipelinebuffers.instance];
+        }else{
+            bufferstructure=[pipelinebuffers.vertex];
+        }
         this.inststructurecount=pipelinebuffers.instance.arrayStride/4;
-        //console.log(pipelinebuffers);
+        this.vertstructurecount=pipelinebuffers.vertex.arrayStride/4;
         this.pipeline=this.device.createRenderPipeline({
             layout:'auto',
             vertex:{
                 module:this.device.createShaderModule({code: this.wgsl}),
                 entryPoint:'main',
-                buffers:[pipelinebuffers.vertex,pipelinebuffers.instance],
+                buffers:bufferstructure,
             },
             fragment:{
                 module:this.device.createShaderModule({code:this.wgsl}),
@@ -438,7 +498,7 @@ class WGPU{
                 ]
             },
             primitive:{
-                topology:'triangle-list'
+                topology:this.webGPUtopology
             },
             depthStencil:{
                 depthWriteEnabled:true,
@@ -453,6 +513,7 @@ class WGPU{
         });
         new Float32Array(this.verticesBuffer.getMappedRange()).set(this.vertex);
         this.verticesBuffer.unmap();
+        if(this.method=="instance"){
         this.indicesBuffer=this.device.createBuffer({
             size: this.index.byteLength,
             usage: GPUBufferUsage.INDEX,
@@ -461,6 +522,7 @@ class WGPU{
         new Uint16Array(this.indicesBuffer.getMappedRange()).set(this.index);
         this.indicesBuffer.unmap();
         this.instanceBuffer=this.device.createBuffer({size:268435456/10,usage:GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST});
+        }
     }
     //毎フレーム呼び出される。
     render(inst){
@@ -476,9 +538,10 @@ class WGPU{
             p.byteOffset,
             p.byteLength
         );
-        const instp=new Float32Array(inst);
-        //メモリリークの原因か？
-        this.device.queue.writeBuffer(this.instanceBuffer,0,instp);
+        if(this.method=="instance"){
+            const instp=new Float32Array(inst);
+            this.device.queue.writeBuffer(this.instanceBuffer,0,instp);
+        }
         const bindGroup=this.device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [{binding:0,resource:{buffer:uniformBuffer}}]
@@ -497,9 +560,14 @@ class WGPU{
         passEncoder.setPipeline(this.pipeline);
         passEncoder.setBindGroup(0, bindGroup);
         passEncoder.setVertexBuffer(0,this.verticesBuffer);
-        passEncoder.setIndexBuffer(this.indicesBuffer,"uint16");
-        passEncoder.setVertexBuffer(1,this.instanceBuffer);
-        passEncoder.drawIndexed(this.index.length,instp.length/this.inststructurecount);
+        if(this.method=="instance"){
+            passEncoder.setIndexBuffer(this.indicesBuffer,"uint16");
+            passEncoder.setVertexBuffer(1,this.instanceBuffer);
+            passEncoder.drawIndexed(this.index.length,instp.length/this.inststructurecount);
+        }
+        if(this.method=="segment"){
+            passEncoder.draw(this.vertex.length/this.vertstructurecount);
+        }
         passEncoder.end();
         this.device.queue.submit([commandEncoder.finish()]);
     }
