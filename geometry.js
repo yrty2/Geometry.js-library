@@ -184,15 +184,20 @@ const projection={
             return new cartesian2D(cart.x/cart.z,cart.y/cart.z);
         }
     },
-    stereographic(pole){
-        if(pole.constructor==polerSpherical){
-        return (new cartesian2D(Math.cos(pole.theta)*Math.sin(pole.phi),
-                Math.sin(pole.theta)*Math.sin(pole.phi))).scale(pole.radius/(1-Math.cos(pole.phi)));
+    spherical(p,r){
+        if(!r){
+            r=1;
         }
-        return (new cartesian2D(pole.x,pole.y)).scale(1/(1-pole.z/pole.r));
+        const len2=vectordot(p,p);
+        const v=vectormul(p,2);
+        v.push(len2-1);
+        return vectormul(v,1/(len2+1));
     },
-    stereographic3D(pole){
-        return (new cartesian(pole.x,pole.y,pole.z)).scale(1/(1-pole.w/pole.r));
+    stereographic(p,r){
+        if(!r){
+            r=1;
+        }
+        return vectormul(p.slice(0,p.length-1),1/(1-p[p.length-1]/r));
     },
     poincareDisk(hyp){
         return hyp;
@@ -361,8 +366,7 @@ const c128={
         }
     }
 }
-//for rendering
-//うまくいってない。これはそのうちやる
+//!for rendering
 const GPUworkflow=[];
 class WGPU{
     constructor(geometry,uniformsize,wgsl,method){
