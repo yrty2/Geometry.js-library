@@ -1,4 +1,3 @@
-//任意曲率にチェンジ
 class geometry{
     constructor(curvature,dim){
         this.curvature=curvature;
@@ -72,7 +71,7 @@ class geometry{
             v=vectorsum(v,this.native(p));
         }
         if(this.curvature<0){
-            v=vectormul(v,1/Math.sqrt(-vectormot(v,v)));
+            v=vectormul(v,this.radius/Math.sqrt(-vectormot(v,v)));
         }else{
         v=vectornormalize(v);
         }
