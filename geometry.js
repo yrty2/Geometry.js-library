@@ -1,112 +1,151 @@
+//任意曲率にチェンジ
 class geometry{
-    constructor(type){
-        if(["S","E","H"].indexOf(type[0])==-1){
-            console.warn(`球面、平面、双曲面しかありません！${type[0]}とはなんですか？`);
-        }else{
-            this.type=type;
-        }
-    }
-    get dim(){
-        return parseInt(this.type.slice(1));
+    constructor(curvature,dim){
+        this.curvature=curvature;
+        this.dim=dim;
+        this.radius=1/Math.sqrt(Math.abs(curvature));
     }
     length(p){
-        if(this.type[0]=="S"){
-            return 2*Math.atan(vectorlength(p));
-        }
-        if(this.type[0]=="E"){
-            return vectorlength(p);
-        }
-        if(this.type[0]=="H"){
-            return 2*Math.atanh(vectorlength(p));
-        }
+        return this.apd(vectorlength(p));
     }
     distance(p,q){
         return this.length(this.translate(p,vectorneg(q)));
     }
-    translate(p,a){
-        if(this.type[0]=="S"){
-            if(this.dim==2){
-                return c128.quot(c128.sum(p,a),c128.sub([1,0],c128.mul(p,c128.conjugate(a))));
-            }
-            if(this.dim==3){
-                const qq=vectordot(a,a);
-                if(qq>0){
-                    const pq=vectordot(p,a);
-                    const pp=vectordot(p,p);
-                return vectormul(
-                        vectorsum(vectormul(p,1-qq-2*pq),vectormul(a,(1+pp))),
-                    1/(1-2*pq+pp*qq)
-                );
-                }
-                return p;
-            }
+    translate(p,q){
+        if(this.curvature==0){
+            return vectorsum(p,q);
         }
-        if(this.type[0]=="E"){
-            const res=Array(this.dim);
-            for(let k=0; k<p.length; ++k){
-                res.push(p[k],a[k]);
-            }
-            return res;
+        if(this.dim==2){
+            return c128.quot(c128.sum(p,q),c128.sub([1,0],c128.prod(c128.mul(p,c128.conjugate(q)),this.curvature)));
         }
-        if(this.type[0]=="H"){
-            if(this.dim==2){
-                return c128.quot(c128.sum(p,a),c128.sum([1,0],c128.mul(p,c128.conjugate(a))));
+        if(this.dim==3){
+            const qq=vectordot(q,q);
+            const pq=vectordot(p,q);
+            const pp=vectordot(p,p);
+            return vectormul(
+                vectorsum(
+                    vectormul(p,1+this.curvature*qq),
+                    vectormul(q,1-this.curvature*(pp+2*pq))
+                ),
+                1/(1+this.curvature*(this.curvature*pp*qq-2*pq))
+            );
             }
-            if(this.dim==3){
-                const t=vectorlength(a);
-                if(t>0){
-                const pabs=vectordot(p,p);
-                const u=vectornormalize(p);
-                return vectormul(
-                    vector.mul(
-                        vectorsum(vectormul(p,1+t*t+2*t*vectordot(p,u)),vectormul(u,t*(1-pabs)))
-                    ),
-                    1/(1+2*t*vectordot(p,u)+t*t*pabs)
-                );
-                }
-                return p;
-            }
-        }
     }
     scale(p,s){
-        if(this.type[0]=="S"){
-            const a=vectorlength(p);
-            return vectormul(p,Math.tan(s*Math.atan(a))/a);
-        }
-        if(this.type[0]=="E"){
+        if(this.curvature==0){
             return vectormul(p,s);
         }
-        if(this.type[0]=="H"){
-            return vectormul(p,s);
+        const t=vectorlength(p);
+        return vectormul(p,this.pd(s*this.apd(t))/t);
+    }
+    pd(d){
+        if(this.curvature==0){
+            return d;
+        }
+        if(this.curvature>0){
+            return this.radius*Math.tan(d/(2*this.radius));
+        }else{
+            return this.radius*Math.tanh(d/(2*this.radius));
+        }
+    }
+    apd(d){
+        if(this.curvature==0){
+            return d;
+        }
+        if(this.curvature>0){
+            return 2*this.radius*Math.atan(d/this.radius);
+        }else{
+            return 2*this.radius*Math.atanh(d/this.radius);
         }
     }
     midpoint(P){
-        if(this.type[0]=="S"){
-            if(this.dim==3){
-                let ls=[0,0,0,0];
-                for(let k=0; k<P.length; ++k){
-                    ls=vectorsum(ls,vectormul(
-                        [2*P[k][0],2*P[k][1],2*P[k][2],vectordot(P[k],P[k])-1],
-                        1/(vectordot(P[k],P[k])+1)
-                    ));
-                }
-                const lm=vectornormalize(ls);
-                return vectormul(lm.slice(0,3),1/(1-lm[3]));
+        if(this.curvature==0){
+            let p=Array(this.dim).fill(0);
+            for(let k=0; k<P.length; ++k){
+                p=vectorsum(p,P[k]);
+            }
+            return vectormul(p,1/P.length);
+        }
+        //Pのネイティブの和の正規化を射影
+        let v=Array(this.dim+1).fill(0);
+        for(const p of P){
+            v=vectorsum(v,this.native(p));
+        }
+        if(this.curvature<0){
+            v=vectormul(v,1/Math.sqrt(-vectormot(v,v)));
+        }else{
+        v=vectornormalize(v);
+        }
+        return this.projected(v);
+    }
+    geodesic(p,q,d,twiced){
+        if(this.curvature==0){
+            return [p,q];
+        }
+        const res=[];
+        if(!d){
+            d=8;
+        }
+        const pq=this.translate(p,vectorneg(q));
+        const t=vectorlength(pq);
+        if(twiced){
+            for(let k=0; k<d; ++k){
+                res.push(this.translate(vectormul(pq,this.pd(k/d*this.apd(t))/t),q));
+                res.push(this.translate(vectormul(pq,this.pd((k+1)/d*this.apd(t))/t),q));
+            }
+        }else{
+            for(let k=0; k<=d; ++k){
+                res.push(this.translate(vectormul(pq,this.pd(k/d*this.apd(t))/t),q));
             }
         }
+        return res;
     }
-    refrection(P,m){
+    refrection(p,q,c){
+        if(!c){
+            c=Array(this.dim).fill(0);
+        }
+        const pc=this.translate(p,vectorneg(c));
+        const qc=this.translate(q,vectorneg(c));
+        const mirror=vectorsub(pc,vectormul(qc,2*vectordot(pc,qc)/vectordot(qc,qc)));
+        return this.translate(this.translate(mirror,vectorneg(c)),this.scale(q,2));
+    }
+    refrectionGroup(P,q){
+        //cはPの中点。
+        const m=this.midpoint(P);
         const res=[];
-        if(this.type[0]=="S"){
-            if(this.dim==3){
-                const vn=vectornormalize(m);
-                const m2=this.scale(m,2);
-                for(const p of P){
-                    const mirrored=vectorsub(p,vectormul(vn,2*vectordot(p,vn)));
-                    res.push(this.translate(m2,mirrored));
-                }
-                return res;
-            }
+        for(const p of P){
+            res.push(this.refrection(p,q,m));
+        }
+        return res;
+    }
+    cliffordtranslate(p,q){
+        //球面移動をクリフォード代数で行う場合(S^3限定)
+        const t=vectorlength(q);
+        const sint=Math.sin(t)/t;
+        const rotor=[Math.cos(t),0,0,0,0,
+            0,0,0,
+            q[0]*sint,q[1]*sint,q[2]*sint,
+            0,0,0,0,0
+        ];
+        return this.projected(clifford.rotate4D(this.native(p),rotor));
+    }
+    projected(p){
+        //p is this.dim+1 dimensional
+        return vectormul(p.slice(0,p.length-1),1/(1-Math.sign(this.curvature)*p[p.length-1]/this.radius));
+    }
+    native(p){
+        const rev=1/this.curvature;
+        const pp=vectordot(p,p);
+        const v=vectormul(p,2*rev);
+        v.push(Math.sign(this.curvature)*this.radius*(pp-rev));
+        return vectormul(v,1/(rev+pp));
+    }
+    honeycomb(p,q){
+        //{p,q}
+        let R=1;
+        if(this.curvature!=0){
+        const tan=Math.tan(Math.PI/p)*Math.tan(Math.PI/q);
+        R=this.radius*Math.sqrt(Math.abs(tan-1)/(tan+1));
         }
     }
 }
@@ -153,9 +192,9 @@ function vectordot(a,b){
     return res;
 }
 function vectormot(a,b){
-    let res=a[0]*b[0];
-    for(let k=1; k<a.length; ++k){
-        res-=a[k]*b[k];
+    let res=-a[a.length-1]*b[a.length-1];
+    for(let k=0; k<a.length-1; ++k){
+        res+=a[k]*b[k];
     }
     return res;
 }
@@ -204,13 +243,13 @@ const projection={
     },
     klein(hyp){
         //ベルトラミ・クラインモデル
-        const abs=c32.abs(hyp)[0];
-        return c32.prod(c32.prod(hyp,2),1/(1+abs*abs));
+        const abs=c128.abs(hyp);
+        return c128.prod(c128.prod(hyp,2),1/(1+abs*abs));
     },
     upperhalf(hyp){
         //上半平面
-        const z=c32.const(hyp[1],-hyp[0]);   
-        return c32.sub(c32.mul(c32.quot(c32.sum(c32.one,z),c32.sub(c32.one,z)),c32.i),c32.i);
+        const z=[hyp[1],-hyp[0]];   
+        return c128.sum(c128.mul(c128.quot(c128.sum([1,0],z),c128.sub([1,0],z)),[0,-1]),[0,1]);
     },
     disk(hyp,f){
         //0でクライン、1でポアンカレ
@@ -296,6 +335,33 @@ function Cl(hyperbolic,imaginary){
     }
     return tape+"]";
 }
+const q256={
+    const(a,b,c,d){
+        return [a,b,c,d];
+    },
+    mul(p,q){
+        return [
+            p[0]*q[0]-p[1]*q[1]-p[2]*q[2]-p[3]*q[3],
+            p[0]*q[1]+p[1]*q[0]+p[2]*q[3]-p[3]*q[2],
+            p[0]*q[2]+p[2]*q[0]+p[3]*q[1]-p[1]*q[3],
+            p[0]*q[3]+p[3]*q[0]+p[1]*q[2]-p[2]*q[1]
+        ]
+    },
+    conj(p){
+        return [p[0],-p[1],-p[2],-p[3]];
+    },
+    camrot(v){
+        const t=vectorlength(v);
+        if(t==0){
+            return [1,0,0,0];
+        }
+        return [Math.cos(t),-v[1]*Math.sin(t)/t,-v[0]*Math.sin(t)/t,0];
+    },
+    rotate(v,r){
+        const q=this.mul(this.mul(r,[0,...v]),this.conj(r));
+        return q.slice(1,4);
+    }
+}
 const c128={
     const(a,b){
         return [a,b];
@@ -329,7 +395,7 @@ const c128={
         return [z[0]+w[0],z[1]+w[1]];
     },
     sub(z,w){
-        return [z[0]+w[0],z[1]+w[1]];
+        return [z[0]-w[0],z[1]-w[1]];
     },
     abs(z){
         return Math.sqrt(z[0]*z[0]+z[1]*z[1]);
@@ -510,13 +576,7 @@ class WGPU{
                 format:'depth24plus',
             }
         });
-        this.verticesBuffer=this.device.createBuffer({
-            size: this.vertex.byteLength,
-            usage: GPUBufferUsage.VERTEX,
-            mappedAtCreation: true,
-        });
-        new Float32Array(this.verticesBuffer.getMappedRange()).set(this.vertex);
-        this.verticesBuffer.unmap();
+        this.verticesBuffer=this.device.createBuffer({size:268435456/10,usage:GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST});
         if(this.method=="instance"){
         this.indicesBuffer=this.device.createBuffer({
             size: this.index.byteLength,
@@ -546,6 +606,7 @@ class WGPU{
             const instp=new Float32Array(inst);
             this.device.queue.writeBuffer(this.instanceBuffer,0,instp);
         }
+        this.device.queue.writeBuffer(this.verticesBuffer,0,this.vertex);
         const bindGroup=this.device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [{binding:0,resource:{buffer:uniformBuffer}}]
