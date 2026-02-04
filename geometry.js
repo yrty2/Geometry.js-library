@@ -1,8 +1,13 @@
+//任意曲率にチェンジ
 class geometry{
     constructor(curvature,dim){
         this.curvature=curvature;
         this.dim=dim;
-        this.radius=1/Math.sqrt(Math.abs(curvature));
+        if(this.curvature==0){
+            this.radius=1;//本当は∞にするべきだが悪さをするので
+        }else{
+            this.radius=1/Math.sqrt(Math.abs(curvature));
+        }
     }
     length(p){
         return this.apd(vectorlength(p));
@@ -73,7 +78,7 @@ class geometry{
         if(this.curvature<0){
             v=vectormul(v,this.radius/Math.sqrt(-vectormot(v,v)));
         }else{
-        v=vectornormalize(v);
+        v=vectormul(vectornormalize(v),this.radius);
         }
         return this.projected(v);
     }
@@ -88,12 +93,12 @@ class geometry{
         const pq=this.translate(p,vectorneg(q));
         const t=vectorlength(pq);
         if(twiced){
-            for(let k=0; k<d; ++k){
+            for(let k=d; k>=1; --k){
                 res.push(this.translate(vectormul(pq,this.pd(k/d*this.apd(t))/t),q));
-                res.push(this.translate(vectormul(pq,this.pd((k+1)/d*this.apd(t))/t),q));
+                res.push(this.translate(vectormul(pq,this.pd((k-1)/d*this.apd(t))/t),q));
             }
         }else{
-            for(let k=0; k<=d; ++k){
+            for(let k=d; k>=0; --k){
                 res.push(this.translate(vectormul(pq,this.pd(k/d*this.apd(t))/t),q));
             }
         }
@@ -108,9 +113,11 @@ class geometry{
         const mirror=vectorsub(pc,vectormul(qc,2*vectordot(pc,qc)/vectordot(qc,qc)));
         return this.translate(this.translate(mirror,vectorneg(c)),this.scale(q,2));
     }
-    refrectionGroup(P,q){
+    refrectionGroup(P,q,m){
         //cはPの中点。
-        const m=this.midpoint(P);
+        if(!m){
+        m=this.midpoint(P);
+        }
         const res=[];
         for(const p of P){
             res.push(this.refrection(p,q,m));
@@ -139,14 +146,160 @@ class geometry{
         v.push(Math.sign(this.curvature)*this.radius*(pp-rev));
         return vectormul(v,1/(rev+pp));
     }
-    honeycomb(p,q){
+    honeycombcurvature(p,q){
+        const d=(p-2)*(q-2);
+        if(d==4){
+            return 0;
+        }
+        if(d>4){
+            return -1;
+        }
+        return 1;
+    }
+    generalizedHoneycomb(poly,curvature,dim,level,limit){
+        //2-dimentional!
+        if(!level){
+            level=3;
+        }
+        const geo=new geometry(curvature,dim);
+        //鏡映
+        const base=poly;
+        let stk=[base];
+        let pdata=[base];
+        function create(){
+            const newdata=[];
+            for(const p of pdata){
+            //pdataの周りで。
+            for(let k=0; k<p.normal.length; ++k){
+                const n=p.normal[k];
+                let safe=true;
+                const cent=geo.refrection(p.center,n,p.center);
+                if(stk.findIndex(e=>geo.distance(e.center,cent)<0.3)!=-1){
+                    safe=false;
+                }
+                if(safe){
+                    newdata.push({
+                        center:cent,
+                        vertex:geo.refrectionGroup(p.vertex,n,p.center),
+                        segment:p.segment,
+                        normal:geo.refrectionGroup(p.normal,n,p.center)
+                    });
+                }
+            }
+        }
+        stk.push(...newdata);
+        pdata=newdata;
+        }
+        if(!limit){
+        for(let k=0; k<level-1; ++k){
+            create();
+        }
+        }else{
+            //limitがある
+            while(stk.length<limit){
+                const prev=stk.slice();
+                create();
+                if(stk.length==prev.length){
+                    stk=prev;
+                    break;
+                }
+            }
+        }
+        return stk;
+    }
+    honeycomb(p,q,level,limit){
+        //2-dimentional!
+        if(!level){
+            level=3;
+        }
         //{p,q}
         let R=1;
-        if(this.curvature!=0){
-        const tan=Math.tan(Math.PI/p)*Math.tan(Math.PI/q);
-        R=this.radius*Math.sqrt(Math.abs(tan-1)/(tan+1));
+        const geo=new geometry(this.honeycombcurvature(p,q),2);
+        if(geo.curvature!=0){
+            const tan=Math.tan(Math.PI/p)*Math.tan(Math.PI/q);
+            R=Math.sqrt(Math.abs(tan-1)/(tan+1));
         }
+        const vert=[];
+        const segm=[];
+        const norm=[];
+        for(let k=0; k<p; ++k){
+            vert.push(c128.poler(R,2*Math.PI*k/p));
+            norm.push(geo.midpoint([c128.poler(R,2*Math.PI*k/p),c128.poler(R,2*Math.PI*(k+1)/p)]));
+            segm.push([k,(k+1)%p]);
+        }
+        //鏡映
+        const base={center:[0,0],vertex:vert,segment:segm,normal:norm};
+        return this.generalizedHoneycomb(base,geo.curvature,2,level,limit);
     }
+    honeycomb3(p,q,r,level,limit){
+        let curve=1;
+        let R=0;
+        const sin=Math.sin(Math.PI/q);
+        const cos=1/Math.cos(Math.PI/r);
+        const tan=Math.tan(Math.PI/p);
+        R=Math.tan(Math.acos(1/Math.sqrt(2*(tan*tan*sin*sin*cos*cos-1)))/2);
+        console.log(R);
+        const poly=this.polyhedra(p,q,R,curve);
+        return this.generalizedHoneycomb(poly,curve,3,level,limit);
+    }
+    polyhedra(p,q,scale,curvature){
+        if(!curvature){
+            curvature=0;
+        }
+        const geo=new geometry(curvature,3);
+        const res={vertex:[],segment:[],normal:[],center:[0,0,0]};
+        const curve=this.honeycombcurvature(p,q);
+        if(curve==1){
+            const sphere=new geometry(1,2);
+            const poly=this.honeycomb(p,q,0,120);//while ending
+            //点をネイティブに変換するだけ
+            for(const p of poly){
+                const surface=[];
+                for(const v of p.vertex){
+                    surface.push(vectormul(sphere.native(v),scale));
+                }
+                const offset=res.segment.length;
+                for(const s of p.segment){
+                    res.segment.push([s[0]+offset,s[1]+offset]);
+                }
+                res.vertex.push(...surface);
+                res.normal.push(geo.midpoint(surface));//これはどうだ？
+            }
+        }
+        return res;
+    }
+    polychora(p,q,r,scale){
+        if(!scale){
+            scale=1;
+        }
+        const res={vertex:[],segment:[],normal:[],center:[0,0,0,0]};
+        const curve=1;
+        if(curve==1){
+            const sphere=new geometry(1,3);
+            const poly=this.honeycomb3(p,q,r,0,120);//while ending
+            //点をネイティブに変換するだけ
+            for(const p of poly){
+                const cell=[];
+                for(const v of p.vertex){
+                    cell.push(vectormul(sphere.native(v),scale));
+                }
+                const offset=res.segment.length;
+                for(const s of p.segment){
+                    res.segment.push([s[0]+offset,s[1]+offset]);
+                }
+                res.vertex.push(...cell);
+                res.normal.push(this.midpoint(cell));//これはどうだ？
+            }
+        }
+        return res;
+    }
+}
+function vectormid(V){
+    let res=Array(V[0].length).fill(0);
+    for(const v of V){
+        res=vectorsum(res,v);
+    }
+    return vectormul(res,1/V.length);
 }
 function vectormul(v,a){
     const res=[];
@@ -208,19 +361,42 @@ function vectornormalize(a){
     }
     return Array(a.length).fill(0)
 }
-class topology{
-}
 const projection={
     //射影
-    orthogonal(cart){
-        if(cart.z>0){
-        return new cartesian2D(cart.x,cart.y);
+    orthogonal(v){
+        if(v && v[v.length-1]>0){
+        return v.slice(0,v.length-1);
         }
     },
-    perspective(cart){
-        if(cart.z>0){
-            return new cartesian2D(cart.x/cart.z,cart.y/cart.z);
+    multiOrthogonal(v){
+        let res=v.slice();
+        for(let k=0; k<v.length-2; ++k){
+            res=this.orthogonal(res);
         }
+        return res;
+    },
+    perspective(v,factor){
+        if(!factor){
+            factor=0;
+        }
+        if(v && v[v.length-1]+factor>0){
+            return vectormul(v.slice(0,v.length-1),1.8/(factor+v[v.length-1]));
+        }
+    },
+    persp(v){
+        if(v.length==4){
+            const p=vectormul(v.slice(0,3),10/(4-v[3]));
+            return vectormul(p.slice(0,2),1.8/(2+p[2]));
+            //return this.perspective(this.perspective(v,-1),1);
+        }
+        return this.multiPerspective(v,1);
+    },
+    multiPerspective(v,f){
+        let res=v.slice();
+        for(let k=0; k<v.length-2; ++k){
+            res=this.perspective(res,f*k);
+        }
+        return res;
     },
     spherical(p,r){
         if(!r){
@@ -641,6 +817,200 @@ class WGPU{
             }
             if(geometry.dim==3){
             }
+        }
+    }
+}
+class easyKey{
+    constructor(src){
+        this.key={};
+        src.addEventListener("keydown",e=>{
+            this.key[e.code]=true;
+        });
+        src.addEventListener("keyup",e=>{
+            this.key[e.code]=false;
+        });
+    }
+    get wasdvector(){
+        const v=[0,0];
+        if(this.key.KeyW){
+            v[1]++;
+        }
+        if(this.key.KeyA){
+            v[0]--;
+        }
+        if(this.key.KeyS){
+            v[1]--;
+        }
+        if(this.key.KeyD){
+            v[0]++;
+        }
+        if(v[0]==0 && v[1]==0){
+            return [0,0];
+        }
+        return vectornormalize(v);
+    }
+    get wasdssvector(){
+        const v=[0,0,0];
+        if(this.key.KeyW){
+            v[2]++;
+        }
+        if(this.key.KeyA){
+            v[0]--;
+        }
+        if(this.key.KeyS){
+            v[2]--;
+        }
+        if(this.key.KeyD){
+            v[0]++;
+        }
+        if(this.key.ShiftLeft){
+            v[1]--;
+        }
+        if(this.key.Space){
+            v[1]++;
+        }
+        if(v[0]==0 && v[1]==0 && v[2]==0){
+            return [0,0,0,0];
+        }
+        return vectornormalize(v);
+    }
+    get wasdsseqvector(){
+        const v=[0,0,0,0];
+        if(this.key.KeyW){
+            v[2]++;
+        }
+        if(this.key.KeyA){
+            v[0]--;
+        }
+        if(this.key.KeyS){
+            v[2]--;
+        }
+        if(this.key.KeyD){
+            v[0]++;
+        }
+        if(this.key.KeyE){
+            v[3]++;
+        }
+        if(this.key.KeyQ){
+            v[3]--;
+        }
+        if(this.key.ShiftLeft){
+            v[1]--;
+        }
+        if(this.key.Space){
+            v[1]++;
+        }
+        if(v[0]==0 && v[1]==0 && v[2]==0 && v[3]==0){
+            return [0,0,0,0];
+        }
+        return vectornormalize(v);
+    }
+}
+class easyViz{
+    constructor(canvas,geometry){
+        this.canvas=canvas;
+        this.camera=Array(geometry.dim).fill(0);
+        this.ctx=canvas.getContext("2d");
+        this.geo=geometry;
+        this.scaler=Math.min(canvas.width,canvas.height)/2;
+        this.clipRadius=1;
+        this.perspectivefactor=0;
+    }
+    clip(p){
+        const q=projection.persp(vectorsub(p,this.camera));
+        if(q){
+        const v=vectormul(q,this.scaler/this.clipRadius);
+        return [v[0]+this.canvas.width/2,this.canvas.height/2-v[1]];
+        }else{
+            return [undefined,undefined];
+        }
+    }
+    point(p,radius){
+        if(!radius){
+            radius=10;
+        }
+        const v=this.clip(p);
+        this.ctx.beginPath();
+        this.ctx.arc(v[0],v[1],radius,0,2*Math.PI);
+        this.ctx.fill();
+        this.ctx.beginPath();
+    }
+    line(p,q,onlypath){
+        if(!onlypath){
+        this.ctx.beginPath();
+        }
+        const path=this.geo.geodesic(p,q,8);
+        for(const p of path){
+            const cp=this.clip(p);
+            this.ctx.lineTo(cp[0],cp[1]);
+        }
+        if(!onlypath){
+        this.ctx.stroke();
+        this.ctx.closePath();
+        }
+    }
+    get width(){
+        return this.canvas.width;
+    }
+    get height(){
+        return this.canvas.height;
+    }
+    clear(){
+        this.ctx.clearRect(0,0,this.width,this.height);
+    }
+    strokeObject(poly){
+        for(const s of poly.segment){
+            this.line(poly.vertex[s[0]],poly.vertex[s[1]]);
+        }
+    }
+    strokeStruct(str){
+        for(const s of str){
+            this.strokeObject(s);
+        }
+    }
+    pastelcolor(){
+        return `hsla(${math.rand(0,360)},75%,75%)`;
+    }
+    fillObject(poly,stared){
+        this.polygon(poly.vertex,poly.segment,poly.color,stared);
+    }
+    polygon(vert,segm,color,stared){
+        if(!color){
+            color="#ffffff";
+        }
+        const bl=(this.geo.curvature>0) && this.geo.length(this.geo.midpoint(vert))>Math.PI*0.8;
+        if(bl){
+            stared=false;
+        }
+        this.ctx.fillStyle=color;
+        this.ctx.beginPath();
+        for(const s of segm){
+            const path=this.geo.geodesic(vert[s[0^stared]],vert[s[1^stared]],8);
+            for(const p of path){
+                const cp=this.clip(p);
+                this.ctx.lineTo(cp[0],cp[1]);
+            }
+        }
+        if(bl){
+            this.ctx.rect(0, 0, this.width, this.height);
+            this.ctx.fill("evenodd");
+        }else{
+            this.ctx.fill();
+        }
+        this.ctx.closePath();
+    }
+    fillStruct(str,stared){
+        for(const s of str){
+            this.pastelcolor();
+            this.fillObject(s,stared);
+        }
+    }
+    paint(poly,color){
+        poly.color=color;
+    }
+    pastelpaint(polylist){
+        for(const poly of polylist){
+            this.paint(poly,this.pastelcolor());
         }
     }
 }
