@@ -35,6 +35,22 @@ class geometry{
             );
             }
     }
+    translateMatrix(p){
+        //何かをp移動させるための行列
+        if(this.dim==3){
+            const pp=vectordot(p,p);
+            const c=1/(1+this.curvature*pp);
+            const qw=c*(1-this.curvature*pp);
+            const u=vectormul(p,2*c);
+            const K=this.curvature/(1+qw);
+            return [
+                [1-K*u[0]*u[0],-K*u[0]*u[1],-K*u[0]*u[2],u[0]],
+                [-K*u[1]*u[0],1-K*u[1]*u[1],-K*u[1]*u[2],u[1]],
+                [-K*u[2]*u[0],-K*u[2]*u[1],1-K*u[2]*u[2],u[2]],
+                [-this.curvature*u[0],-this.curvature*u[1],-this.curvature*u[2],qw]
+            ]
+        }
+    }
     scale(p,s){
         if(this.curvature==0){
             return vectormul(p,s);
@@ -777,8 +793,9 @@ class WGPU{
             p.byteOffset,
             p.byteLength
         );
+        let instp;
         if(this.method=="instance"){
-            const instp=new Float32Array(inst);
+            instp=new Float32Array(inst);
             this.device.queue.writeBuffer(this.instanceBuffer,0,instp);
         }
         this.device.queue.writeBuffer(this.verticesBuffer,0,this.vertex);
